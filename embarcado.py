@@ -4,6 +4,7 @@
 usage ./embarcado
 '''
 import time
+import math
 import json
 import serial
 import asyncio
@@ -13,8 +14,7 @@ from   serial.tools import list_ports
 '''
 CONSTANTS(ADAPT FOR YOUR HARDWARE)
 '''
-ARDUINO_VID_PID = '2341:0001'
-
+ARDUINO_VID_PID = '2341:0010'
 
 '''
 Find and open a serial connection with Arduino.
@@ -48,6 +48,19 @@ if serialCon.isOpen():
     except Exception as e:
         print('Error flushing serial port: ' + str(e))
 
+
+def calcAngle(x,y,z):
+    x = float(x)
+    y = float(y)
+    z = float(z)
+    m = math.sqrt(x*x+y*y+z*z)
+    angleX=math.acos(x/m)
+    angleY=math.acos(y/m)
+    angleZ=math.acos(z/m)
+    print('X: '+ str(angleX))
+    print('Y: ' + str(angleY))
+    print('Z: ' + str(angleZ))
+
 '''
 Writes data on device on serial port
 Called by assyncronous task to read from server
@@ -68,10 +81,11 @@ def serialReader():
     global serialCon
     if serialCon.isOpen():
         try:
-            writeToWebServer(serialCon.readline().decode())
+            bytes = serialCon.inWaiting()
+            writeToWebServer(serialCon.read(bytes))
         except Exception as e:
             print('Could not read data from serial con: ' + str(e))
-    time.sleep(1)
+    #time.sleep(1)
     asyncio.async(serialReader())
 
 '''
@@ -103,6 +117,12 @@ def writeToWebServer(data):
     #request = requests.post('', data=data)
     #print(request.status_code, request.reason)
     print(data)
+    #angles = data.split(' ')
+    #if len(angles) > 2:
+    #    x = angles[1]
+    #    y = angles[3]
+    #    z = angles[5].rstrip('\n').rstrip('\r')
+    #    calcAngle(x,y,z)
 
 '''
 main funtcion

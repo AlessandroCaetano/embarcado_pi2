@@ -6,15 +6,18 @@ usage ./embarcado
 import time
 import math
 import json
+import smbus
 import serial
 import asyncio
 import requests
 from   serial.tools import list_ports
 
 '''
-CONSTANTS(ADAPT FOR YOUR HARDWARE)
+    CONSTANTS(ADAPT FOR YOUR HARDWARE)
 '''
-ARDUINO_VID_PID = '2341:0010'
+
+ARDUINO_VID_PID = '2341:0001'
+PCF8591_ADDRESS = 0x70
 
 '''
 Find and open a serial connection with Arduino.
@@ -48,7 +51,6 @@ if serialCon.isOpen():
     except Exception as e:
         print('Error flushing serial port: ' + str(e))
 
-
 def calcAngle(x,y,z):
     x = float(x)
     y = float(y)
@@ -61,9 +63,25 @@ def calcAngle(x,y,z):
     print('Y: ' + str(angleY))
     print('Z: ' + str(angleZ))
 
+
+#Open i2c connection
+bus = smbus.SMBus(0)
+
 '''
-Writes data on device on serial port
-Called by assyncronous task to read from server
+    Write to i2c raspberry pin port
+'''
+def busWrite(value):
+    bus.write_block_data(PCF8591_ADDRESS, 0, value)
+
+'''
+    Read from i2c raspberry pin port
+'''
+def busRead():
+    reader = bus.read_byte_data(PCF8591_ADDRESS, 1)
+    return reader
+
+'''
+    Writes data on device on serial port. Called by assyncronous task to read from server
 '''
 def serialWriter(data):
     global serialCon
@@ -74,7 +92,7 @@ def serialWriter(data):
             print('Could not write data on serial con: ' + str(e))
 
 '''
-Assyncronous task to read data from serial port
+    Assyncronous task to read data from serial port
 '''
 @asyncio.coroutine
 def serialReader():
@@ -85,11 +103,11 @@ def serialReader():
             writeToWebServer(serialCon.read(bytes))
         except Exception as e:
             print('Could not read data from serial con: ' + str(e))
-    #time.sleep(1)
-    asyncio.async(serialReader())
+    time.sleep(1)
+    asyncio.ensure_future(serialReader())
 
 '''
-Method to close serial connection when needed
+    Method to close serial connection when needed
 '''
 def closeSerialConnection():
     global serialCon
@@ -100,7 +118,7 @@ def closeSerialConnection():
             print('Error closing serial connection: ' + str(e))
 
 '''
-Assyncronous task to read from web server
+    Assyncronous task to read from web server
 '''
 @asyncio.coroutine
 def readWebServer():
@@ -108,10 +126,10 @@ def readWebServer():
     data = bytes('asdasdas', 'UTF-8')
     serialWriter(data)
     time.sleep(1)
-    asyncio.async(readWebServer())
+    asyncio.ensure_future(readWebServer())
 
 '''
-Writing to web server via post api, currently only printing on terminal
+    Writing to web server via post api, currently only printing on terminal
 '''
 def writeToWebServer(data):
     #request = requests.post('', data=data)
@@ -125,13 +143,13 @@ def writeToWebServer(data):
     #    calcAngle(x,y,z)
 
 '''
-main funtcion
+    main funtcion
 '''
 def main():
     loop = asyncio.get_event_loop()
     try:
-        asyncio.async(serialReader())
-        asyncio.async(readWebServer())
+        asyncio.ensure_future(serialReader())
+        asyncio.ensure_future(readWebServer())
         loop.run_forever()
     except KeyboardInterrupt:
         pass

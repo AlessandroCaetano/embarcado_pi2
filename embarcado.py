@@ -8,16 +8,23 @@ import math
 import json
 import smbus
 import serial
-import asyncio
+from concurrent.futures import ProcessPoolExecutor
 import requests
 from   serial.tools import list_ports
 
 '''
-    CONSTANTS(ADAPT FOR YOUR HARDWARE)
+CONSTANTS(ADAPT FOR YOUR HARDWARE)
 '''
-
 ARDUINO_VID_PID = '2341:0001'
 PCF8591_ADDRESS = 0x70
+
+'''
+Global variables for engine and angle normalization
+'''
+engine_vel = {}
+angle = {}
+calibration = True
+d1 = d2 = d3 = velocity = angle = 0.0
 
 '''
 Find and open a serial connection with Arduino.
@@ -51,6 +58,9 @@ if serialCon.isOpen():
     except Exception as e:
         print('Error flushing serial port: ' + str(e))
 
+#Open i2c connection
+bus = smbus.SMBus(1)
+
 def calcAngle(x,y,z):
     x = float(x)
     y = float(y)
@@ -64,50 +74,43 @@ def calcAngle(x,y,z):
     print('Z: ' + str(angleZ))
 
 
-#Open i2c connection
-bus = smbus.SMBus(0)
+'''
+Write to i2c raspberry pin port
+'''
+def busWrite():
+    global engine_vel, velocity
+    value = engine_vel.get(velocity)
+    bus.write_byte_data(PCF8591_ADDRESS, 0x44, value)
 
 '''
-    Write to i2c raspberry pin port
+Writes data on device on serial port. Called by assyncronous task to read from server
 '''
-def busWrite(value):
-    bus.write_block_data(PCF8591_ADDRESS, 0, value)
+
+#def serialWriter():
+#    global serialCon
+#    while True:
+#        if serialCon.isOpen():
+#            try:
+#                serialCon.write(data)
+#            except Exception as e:
+#                print('Could not write data on serial con: ' + str(e))
+#
 
 '''
-    Read from i2c raspberry pin port
+Assyncronous task to read data from serial port
 '''
-def busRead():
-    reader = bus.read_byte_data(PCF8591_ADDRESS, 1)
-    return reader
-
-'''
-    Writes data on device on serial port. Called by assyncronous task to read from server
-'''
-def serialWriter(data):
-    global serialCon
-    if serialCon.isOpen():
-        try:
-            serialCon.write(data)
-        except Exception as e:
-            print('Could not write data on serial con: ' + str(e))
-
-'''
-    Assyncronous task to read data from serial port
-'''
-@asyncio.coroutine
 def serialReader():
-    global serialCon
-    if serialCon.isOpen():
-        try:
-            bytes = serialCon.inWaiting()
-            writeToWebServer(serialCon.read(bytes))
-        except Exception as e:
-            print('Could not read data from serial con: ' + str(e))
-    time.sleep(1)
-    asyncio.ensure_future(serialReader())
+    global serialCon, d1, d2, d3, angle
+    while True:
+        if serialCon.isOpen():
+            try:
+                inc_bytes = serialCon.inWaiting()
+            except Exception as e:
+                print('Could not read data from serial con: ' + str(e))
+        time.sleep(1)
 
 '''
-    Method to close serial connection when needed
+Method to close serial connection when needed
 '''
 def closeSerialConnection():
     global serialCon
@@ -117,45 +120,66 @@ def closeSerialConnection():
         except Exception as e:
             print('Error closing serial connection: ' + str(e))
 
+
 '''
-    Assyncronous task to read from web server
+Assyncronous task to read from web server
 '''
-@asyncio.coroutine
 def readWebServer():
-    #data = requests.get('', verify=False).json()
-    data = bytes('asdasdas', 'UTF-8')
-    serialWriter(data)
-    time.sleep(1)
-    asyncio.ensure_future(readWebServer())
+    global velocity
+    while True:
+        data = requests.get('', verify=False).json()
+        time.sleep(1)
+
 
 '''
-    Writing to web server via post api, currently only printing on terminal
+Writing to web server via post api, currently only printing on terminal
 '''
-def writeToWebServer(data):
-    #request = requests.post('', data=data)
-    #print(request.status_code, request.reason)
+def writeToWebServer(values):
+    global velocity, angle, d1, d2, d3
+    data = {"test":{"velocity": values[0], "angle": values[1]}}
+    json_data = json.dumps(data)
+    headers = {'Content-type': 'application/json'}
+    request = requests.put('http://192.168.15.11:3000/tests/1', data=json_data, headers=headers)
+    print(request.status_code, request.reason)
     print(data)
-    #angles = data.split(' ')
-    #if len(angles) > 2:
-    #    x = angles[1]
-    #    y = angles[3]
-    #    z = angles[5].rstrip('\n').rstrip('\r')
-    #    calcAngle(x,y,z)
+
+#def calibration():
+#    global calibration
+#    global engine_vel
+#    if callibrarion == False:
+#            break
+#    elif calibration == True:
+#        for i in range(0,255):
+
 
 '''
-    main funtcion
+main funtcion
 '''
 def main():
-    loop = asyncio.get_event_loop()
+    pool = ProcessPoolExecutor(4);
     try:
-        asyncio.ensure_future(serialReader())
-        asyncio.ensure_future(readWebServer())
-        loop.run_forever()
+        serial_reader_future = pool.submit(serialReader)
+        bus_writer_future = pool.submit(busWrite)
+        web_writer_future = pool.submit(writeToWebServer)
+        web_reader_future = pool.submit(readWebServer)
     except KeyboardInterrupt:
         pass
     finally:
-        loop.close()
-        closeSerialConnection()
+        serial_reader_future.done()
+        bus_writer_future.done()
+        web_writer_future.done()
+        web_reader_future.done()
+
+    #loop = asyncio.get_event_loop()
+    #try:
+    #    asyncio.ensure_future(serialReader())
+    #    asyncio.ensure_future(readWebServer())
+    #    loop.run_forever()
+    #except KeyboardInterrupt:
+    #    pass
+    #finally:
+    #    loop.close()
+    #    closeSerialConnection()
 
 if __name__  == '__main__':
     main()
